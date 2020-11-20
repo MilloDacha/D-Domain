@@ -1,44 +1,54 @@
-fs = 5e+6;
-t = 0:1/fs:2;
-n = size(t,2);
-f1 = 20e+3;
-f2 = 50;
-Vdc = 600;
-R_l = 1.78;
-Vn = 0.5*Vdc;
+%% This code is written by Millo Dacha -17EE10022  (MATLAB live script code)
+%% 14/11/2020
 
-N_pop = 100;
-N_var = 3;
-s_rate = 0.4;
-upper_limit = [1000,1000,500];
-lower_limit = [0,0,0];
-mutation_rate = 0.02;
-total_iter = 50;
+%Defining basic parameters of the model
+fs = 5e+6;                                  %sampling frequency  
+t = 0:1/fs:2;                               %total time of simulation
+n = size(t,2);                              %total number of samples
+f1 = 20e+3;                                 %carrrier wave frequency
+f2 = 50;                                    %modulating wave frequency
+Vdc = 600;                                  %input DC voltage
+R_l = 1.78;                                 %per phase average load
+Vn = 0.5*Vdc;                               %neutral point 
 
-o1 = Tri_wave(t,f1);
-plot(t(1:1000),o1(1:1000))
+%Defining parameters for genetic algorithm
+N_pop = 100;                                %total size of population
+N_var = 3;                                  %total number of variables (LCL filter parameters)
+s_rate = 0.4;                               %selection rate
+upper_limit = [1000,1000,500];              %upper limit value for L1 (in mH), L2 (in mH) and C (in microFarad) respectively
+lower_limit = [0,0,0];                      %lower limit value for L1 (in mH), L2 (in mH) and C (in microFarad) respectively
+mutation_rate = 0.02;                       %mutation rate
+total_iter = 50;                            %total number of iterations
+
+%Generating signal waves
+o1 = Tri_wave(t,f1);                        %carrier wave generation
+plot(t(1:1000),o1(1:1000))                  
 grid on
 
-o2 = Sine_wave(t,f2,0);
+o2 = Sine_wave(t,f2,0);                     %modulating wave generation
 plot(t(1:1e+5),o2(1:1e+5))
 grid on
 
-g_pulse = comparator(o1,o2);
+g_pulse = comparator(o1,o2);                %comparator output
 plot(t(1:1000),g_pulse(1:1000))
 grid on 
 
-V1 = V_rgb(g_pulse,Vdc,Vn);
+V1 = V_rgb(g_pulse,Vdc,Vn);                 %output voltage of one phase
 plot(t(1:1000),V1(1:1000))
 grid on
 
+%Using genetic algorithm
 [best_cost_values,best_chromosomes,L1,L2,C,G,last] = Genetic_algo(V1,t,R_l,fs,N_pop,N_var,s_rate,upper_limit,lower_limit,mutation_rate,total_iter);
 
-percent_thd = best_cost_values(last);
-Ig = LCL_filter(V1,L1,L2,C,R_l,t);
+%Getting result
+percent_thd = best_cost_values(last);       %total harmonic distortion of the output current wave form from the tuned LCL filter
+Ig = LCL_filter(V1,L1,L2,C,R_l,t);          %output corrent to grid from LCL filter
 plot(t,Ig)
 grid on
-thd(Ig,fs,7)
 
+
+
+%Main script of genetic algorithm
 function [best_cost_values,best_chromosomes,L1,L2,C,G,last] = Genetic_algo(V1,t,R_l,fs,N_pop,N_var,s_rate,upper_limit,lower_limit,mutation_rate,total_iter)
     best_cost_values = zeros(total_iter,1);                %%initialising the best cost values' vector (row no. corresponds to iteration)
     average_cost_values = best_cost_values;                %%initialising the average cost values' vector (row no. corresponds to iteration)    
@@ -68,7 +78,7 @@ function [best_cost_values,best_chromosomes,L1,L2,C,G,last] = Genetic_algo(V1,t,
             parent_popu = eliminate_popu(arranged_popu,N_keep,N_pop);     %refer to the function: eliminate_popu
     
             %pairing the parents (any of the pairing methods can be used)
-            pairs = pairing_method3(N_keep);                                    %refer to the function: paring_method1/2/3/4
+            pairs = pairing_method3(N_keep);                                    %refer to the function: paring_method1
     
             %mating the paired parents and getting new population with offsprings
             new_popu = mating(N_pop,N_keep,parent_popu,pairs,upper_limit,lower_limit,N_var);                  %refer to the function: mating
@@ -82,7 +92,7 @@ function [best_cost_values,best_chromosomes,L1,L2,C,G,last] = Genetic_algo(V1,t,
             %%iteration
             best_cost_values(i) = bestCost;
             average_cost_values(i) = average_cost;
-            best_chromosomes(i,:) = bestChromosome;                         %best k_p, k_i, and k_d parameters for the current generation
+            best_chromosomes(i,:) = bestChromosome;                         %best L1, L2 and C parameters for the current generation
         
             %making new population for next iteration
             popu = mutated_popu;
@@ -112,6 +122,7 @@ end
 
 
 
+%This funcition arranges population based on cost vector
 function arranged_popu = arrange_popu(costVector,popu,N_pop)
     
     [~,rank_vector] = sort(costVector);            %%rank vector corresponding to cost values of the population  
@@ -120,13 +131,14 @@ function arranged_popu = arrange_popu(costVector,popu,N_pop)
     arranged_popu = popu;                                       %initialising the final matrix
     for i = 1:N_pop                                             %going through each row of the population matrix
        temp_rowVector = popu(rank_vector(i),:);                 %taking out the i_th row vector of the population matrix
-       arranged_popu(i,:) = temp_rowVector;        %putting the i_th row of the population matrix to its respective rank in the arranged population matrix with the help of rank matrix
+       arranged_popu(i,:) = temp_rowVector;                     %putting the i_th row of the population matrix to its respective rank in the arranged population matrix with the help of rank matrix
     end
     
 end
 
 
 
+%This function checks the convergence of genetic algorithm
 function flag = convergence_check(best_cost_values,difference_percent,iter_percent,current_iter)
 
     flagCounter = 0;                            %%flag pole
@@ -152,32 +164,35 @@ end
 
 
 
+%This function computes cost value for a given individual/set of LCL parameters
 function percent_thd = cost(V1,L1,L2,C,R_l,t,fs)
-    Ig = LCL_filter(V1,L1,L2,C,R_l,t);
+    Ig = LCL_filter(V1,L1,L2,C,R_l,t);                           %creates LCL filter for given parameters and computes output current waveform
     Igg = Ig(1:fs-1);
-    [Pxx,~] = periodogram(Igg,[],length(Igg),fs);
+    [Pxx,~] = periodogram(Igg,[],length(Igg),fs);                %obtaining spectral power density
     harmonicPowers = 0;
-    for i = 1:6
+    for i = 1:6                                                 
         harmonicPowers = harmonicPowers + Pxx(i+1);
     end
-    percent_thd = 100*sqrt(harmonicPowers/Pxx(1));
+    percent_thd = 100*sqrt(harmonicPowers/Pxx(1));              %total harmonic distortion of Ig signal
 end
 
 
 
+%This function computes cost vector corresponding to a given population matrix
 function costVector = cost_vector(popu,N_pop,V1,R_l,t,fs)
-    costVector = zeros(N_pop,1);                                          
-    for row = 1:N_pop                                            
+    costVector = zeros(N_pop,1);                                %initialising cost vector                                    
+    for row = 1:N_pop                                           %taking out parameters of each individual of the population matrix                                            
         rowData = popu(row,:);                                      
         temp_variable1 = rowData(1);                                
         temp_variable2 = rowData(2);
         temp_variable3 = rowData(3);
-        costVector(row) = cost(V1,temp_variable1,temp_variable2,temp_variable3,R_l,t,fs);  
+        costVector(row) = cost(V1,temp_variable1,temp_variable2,temp_variable3,R_l,t,fs);   %calculating cost value for any given individual
     end
 end
 
 
 
+%This function eliminates individuals with poor cost values
 function eliminated_popu = eliminate_popu(arranged_popu,N_keep,N_pop)
     eliminated_popu = arranged_popu;                                %%initialising the final matrix
     n = N_pop;                                                      %%initialising index to the last row of arranged population matrix
@@ -189,13 +204,15 @@ end
 
 
 
+%This function creates LCL filter for given set of parameters and returns output current waveform on being given Vi voltage as input
 function [output,G] = LCL_filter(Vi,L1,L2,C,R_l,t)
-    G = tf(1,[L1*L2*C*(1e-12), L1*R_l*C*(1e-9), (L1+L2)*(1e-3), R_l]);
-    output = lsim(G,Vi,t);
+    G = tf(1,[L1*L2*C*(1e-12), L1*R_l*C*(1e-9), (L1+L2)*(1e-3), R_l]);      %transfer function for the filter
+    output = lsim(G,Vi,t);                                                  %getting current signal for given input voltage
 end
 
 
 
+%This function re-populates the population matrix by forming new individuals from remaining individuals of population
 function new_popu = mating(N_pop,N_keep,parent_popu,pairs,upper_limit,lower_limit,N_var)
 
     new_popu = parent_popu;                                             %%initialising the new population which will be having offsprings as well
@@ -277,6 +294,7 @@ end
 
 
 
+%This function takes out the best value of current iteration and corresponding information. It also introduces certain degree of mutation.
 function [mutated_new_popu,CostVector,bestCost,bestChromosome,average_cost] = mutation_costVector_bestSolution(V1,R_l,t,fs,new_popu,mutation_rate,N_pop,N_var,upper_limit,lower_limit)
 
     mutated_new_popu = new_popu;                                                    %%initialising final population
@@ -338,6 +356,7 @@ end
 
 
 
+%This function pairs the individual with higher probability of taking those whose cost value is better
 function rankWeight_pairs = pairing_method3(N_keep)
     
     %Calculating probability vector for the parents (rows) of parent
@@ -381,6 +400,7 @@ end
 
 
 
+%This function gives out the result of genetic algorithm
 function [L1,L2,C,G]=result(R_l,best_chromosomes,best_cost_values,average_cost_values,last)
     
     %Getting controller parameters
@@ -403,12 +423,14 @@ end
 
 
 
+%This function creates the modulating wave
 function output = Sine_wave(t,f,phi)
     output = 0.5 + 0.5*sin(2*pi*f*t + (phi*pi)/180);
 end
 
 
 
+%This function generates the carrier wave
 function output = Tri_wave(t,f)
     T = 1/f;
     n = size(t,2);
@@ -426,12 +448,14 @@ end
 
 
 
+%This function generates voltage waveform for a given sequence of gate pulses
 function output = V_rgb(g_pulse,Vdc,Vn)
     output = Vdc*not(g_pulse) - Vn;
 end
 
 
 
+%This function generates the comparator output
 function output = comparator(wave1,wave_ref)
     output = wave1 < wave_ref;
 end
