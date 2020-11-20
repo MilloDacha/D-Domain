@@ -1,0 +1,437 @@
+fs = 5e+6;
+t = 0:1/fs:2;
+n = size(t,2);
+f1 = 20e+3;
+f2 = 50;
+Vdc = 600;
+R_l = 1.78;
+Vn = 0.5*Vdc;
+
+N_pop = 100;
+N_var = 3;
+s_rate = 0.4;
+upper_limit = [1000,1000,500];
+lower_limit = [0,0,0];
+mutation_rate = 0.02;
+total_iter = 50;
+
+o1 = Tri_wave(t,f1);
+plot(t(1:1000),o1(1:1000))
+grid on
+
+o2 = Sine_wave(t,f2,0);
+plot(t(1:1e+5),o2(1:1e+5))
+grid on
+
+g_pulse = comparator(o1,o2);
+plot(t(1:1000),g_pulse(1:1000))
+grid on 
+
+V1 = V_rgb(g_pulse,Vdc,Vn);
+plot(t(1:1000),V1(1:1000))
+grid on
+
+[best_cost_values,best_chromosomes,L1,L2,C,G,last] = Genetic_algo(V1,t,R_l,fs,N_pop,N_var,s_rate,upper_limit,lower_limit,mutation_rate,total_iter);
+
+percent_thd = best_cost_values(last);
+Ig = LCL_filter(V1,L1,L2,C,R_l,t);
+plot(t,Ig)
+grid on
+thd(Ig,fs,7)
+
+function [best_cost_values,best_chromosomes,L1,L2,C,G,last] = Genetic_algo(V1,t,R_l,fs,N_pop,N_var,s_rate,upper_limit,lower_limit,mutation_rate,total_iter)
+    best_cost_values = zeros(total_iter,1);                %%initialising the best cost values' vector (row no. corresponds to iteration)
+    average_cost_values = best_cost_values;                %%initialising the average cost values' vector (row no. corresponds to iteration)    
+    best_chromosomes = zeros(total_iter,N_var);            %%initialising best variables' vector (row no. corresponds to iterations)
+    N_keep = s_rate*N_pop;                                 %%selection amount per iteration
+    flag = 0;                                              %%to check convergence
+    
+    %initializing starting population
+    popu = zeros(N_pop,N_var);                             %%initialising population matrix
+    for i = 1:1:N_var                                      %%filling column after column
+        column = (upper_limit(i)-lower_limit(i))*rand(N_pop,1) + lower_limit(i);        %%randomly generating columns within given bounds
+        popu(:,i) = column;
+    end
+    
+    %evaluating cost value for the population 
+    costVector = cost_vector(popu,N_pop,V1,R_l,t,fs);                   %refer to the function: unified_cost_vector
+    
+    for i = 1:total_iter
+        
+       %if the algorithm hasn't converged yet
+        if flag == 0
+            
+            %arranging the population as per the cost value
+            arranged_popu = arrange_popu(costVector,popu,N_pop);    %refer to the function: arrange_popu
+    
+            %terminating the lower cost valued chromosomes
+            parent_popu = eliminate_popu(arranged_popu,N_keep,N_pop);     %refer to the function: eliminate_popu
+    
+            %pairing the parents (any of the pairing methods can be used)
+            pairs = pairing_method3(N_keep);                                    %refer to the function: paring_method1/2/3/4
+    
+            %mating the paired parents and getting new population with offsprings
+            new_popu = mating(N_pop,N_keep,parent_popu,pairs,upper_limit,lower_limit,N_var);                  %refer to the function: mating
+    
+            %mutating the newly generated population also finding cost vector
+            %and best solution of the current iteration
+            [mutated_popu,CostVector,bestCost,bestChromosome,average_cost] = mutation_costVector_bestSolution(V1,R_l,t,fs,new_popu,mutation_rate,N_pop,N_var,upper_limit,lower_limit);        %refer to the function: mutation_costVector_bestSolution
+            costVector = CostVector;
+        
+            %%updating best cost values, best chromosomes and other details of the present
+            %%iteration
+            best_cost_values(i) = bestCost;
+            average_cost_values(i) = average_cost;
+            best_chromosomes(i,:) = bestChromosome;                         %best k_p, k_i, and k_d parameters for the current generation
+        
+            %making new population for next iteration
+            popu = mutated_popu;
+            
+            %checking convergence
+            if i > 10                                                       %atleast 10 iterations has to be done
+                flag = convergence_check(best_cost_values,0.01,0.5,i);      %refer to the function: convergence_check
+            end
+        
+        %if the algorithm has already converged    
+        elseif flag == 1 
+            break
+            
+        end
+    
+    end
+    
+    %Final result:
+    if flag == 0                                %if the algorithm runs through whole iterations
+        last = total_iter;
+    else
+        last = i-1;                             %if the algorithm converges before final prescribed iteration
+    end
+    [L1,L2,C,G]=result(R_l,best_chromosomes,best_cost_values,average_cost_values,last);        %refer to the function: result
+    
+end
+
+
+
+function arranged_popu = arrange_popu(costVector,popu,N_pop)
+    
+    [~,rank_vector] = sort(costVector);            %%rank vector corresponding to cost values of the population  
+
+    %Arranging the population matrix 
+    arranged_popu = popu;                                       %initialising the final matrix
+    for i = 1:N_pop                                             %going through each row of the population matrix
+       temp_rowVector = popu(rank_vector(i),:);                 %taking out the i_th row vector of the population matrix
+       arranged_popu(i,:) = temp_rowVector;        %putting the i_th row of the population matrix to its respective rank in the arranged population matrix with the help of rank matrix
+    end
+    
+end
+
+
+
+function flag = convergence_check(best_cost_values,difference_percent,iter_percent,current_iter)
+
+    flagCounter = 0;                            %%flag pole
+    p = round(iter_percent*current_iter);       %%number of iterations to be checked apart from current iterations
+    
+    %Cheking if 'p' nos. of iterations' best cost values diverges from that
+    %of the current iteration by 'different_percent' percentage
+    for i = 1:1:p
+        if abs((best_cost_values(current_iter-i)-best_cost_values(current_iter))/best_cost_values(current_iter)) < difference_percent
+            flagCounter = flagCounter+1;        %%number of iterations out of 'p' iterations which satisfies the above 'difference_percent' criteria
+        end    
+    end
+    
+    %Case 1: If all the 'p' iterations' best cost values lies within tolerable level
+    if flagCounter == p
+        flag = 1;
+    %Case 2: If all the 'p' iterations' best cost values does not lie within tolerable level   
+    else 
+        flag = 0;
+    end
+    
+end
+
+
+
+function percent_thd = cost(V1,L1,L2,C,R_l,t,fs)
+    Ig = LCL_filter(V1,L1,L2,C,R_l,t);
+    Igg = Ig(1:fs-1);
+    [Pxx,~] = periodogram(Igg,[],length(Igg),fs);
+    harmonicPowers = 0;
+    for i = 1:6
+        harmonicPowers = harmonicPowers + Pxx(i+1);
+    end
+    percent_thd = 100*sqrt(harmonicPowers/Pxx(1));
+end
+
+
+
+function costVector = cost_vector(popu,N_pop,V1,R_l,t,fs)
+    costVector = zeros(N_pop,1);                                          
+    for row = 1:N_pop                                            
+        rowData = popu(row,:);                                      
+        temp_variable1 = rowData(1);                                
+        temp_variable2 = rowData(2);
+        temp_variable3 = rowData(3);
+        costVector(row) = cost(V1,temp_variable1,temp_variable2,temp_variable3,R_l,t,fs);  
+    end
+end
+
+
+
+function eliminated_popu = eliminate_popu(arranged_popu,N_keep,N_pop)
+    eliminated_popu = arranged_popu;                                %%initialising the final matrix
+    n = N_pop;                                                      %%initialising index to the last row of arranged population matrix
+    while n > N_keep                                                %%going through each index of the arranged population matrix from behind till N_keep index row is reached
+        eliminated_popu(n,:) = zeros(1,size(arranged_popu,2));      %%updating the desired rows of population matrix to zeros
+        n = n-1;                                                    
+    end
+end
+
+
+
+function [output,G] = LCL_filter(Vi,L1,L2,C,R_l,t)
+    G = tf(1,[L1*L2*C*(1e-12), L1*R_l*C*(1e-9), (L1+L2)*(1e-3), R_l]);
+    output = lsim(G,Vi,t);
+end
+
+
+
+function new_popu = mating(N_pop,N_keep,parent_popu,pairs,upper_limit,lower_limit,N_var)
+
+    new_popu = parent_popu;                                             %%initialising the new population which will be having offsprings as well
+    n = size(pairs,2);                                                  %%number of pairs (paired parents)
+    v = size(parent_popu,2);                                            %%number of variables
+    t = N_keep;                                                          %%accounts for the index of the new population (row no.) 
+    flag = 0;                                                           %%keeps an eye on whether max size of the population has been reached or not
+    
+    %Going through all the pairs, while matting, till max size of
+    %population is reached
+    while t <= N_pop
+        
+        %Going through each pair of the paired parents for mating
+        for i = 1:n
+            if flag == 1                                                %%stops when max size of population has been reached
+                break
+            end
+            pa = parent_popu(pairs(1,i),:);                             %%father parent of the i_th pair
+            ma = parent_popu(pairs(2,i),:);                             %%mother parent of the i_th pair
+            a = ceil(rand*size(parent_popu,2));                         %%generating a random point of crossover
+            b = rand;                                                   %%generating a random weightage for partial extrapolation method
+            
+            %Updating each variable of the first offspring
+            for j = 1:v
+                if t+(2*i-1) > N_pop                                    %%stops the loop if max size of population has been reached   
+                    flag = 1;
+                    break
+                elseif j == a                                           %%for the variable at the point of crossover
+                    if ma(a) >= pa(a)
+                        new_popu(t+2*i-1,j) = pa(j) + b*(ma(j)-pa(j));      %%extrapolating
+                    else
+                        new_popu(t+2*i-1,j) = ma(j) + b*(pa(j)-ma(j));      %%extrapolating
+                    end
+                elseif j < a                                            %%for the variables to the left of the crossover point
+                    new_popu(t+2*i-1,j) = pa(j);
+                else                                                    %%for the variables to the right of the crossover point
+                    new_popu(t+2*i-1,j) = ma(j);
+                end
+            end
+            
+            %Updating each variable of the second offspring
+            for j = 1:v
+                if t+(2*i) > N_pop                                      %%stops the loop if max size of the population has been reached
+                    flag = 1;
+                    break
+                elseif j == a                                           %%for the variable at the point of crossover
+                    if ma(a) >= pa(a)
+                        new_popu(t+2*i,j) = ma(j) - b*(ma(j)-pa(j));        %%extrapolating
+                    else
+                        new_popu(t+2*i,j) = pa(j) - b*(pa(j)-ma(j));        %%extrapolating
+                    end    
+                elseif j < a                                            %%for the variables to the left of the crossover point
+                    new_popu(t+2*i,j) = ma(j);
+                else                                                    %%for the variables to the right of the crossover point
+                    new_popu(t+2*i,j) = pa(j);
+                end
+            end 
+            
+        end
+        
+        %Updating the index of the new population/ Updating the indices filled
+        %with offsprings
+        t = t+(2*n);
+        
+    end
+    
+       %Ensuring that all the variables are within acceptable bound
+    for i = 1:1:N_pop                                                               %%going through each row
+        for j = 1:1:N_var                                                           %%going through each column
+            if new_popu(i,j) > upper_limit(j)                               %%if the variable exceeds the limit then it will be cut short within bound
+                new_popu(i,j) = upper_limit(j);
+            elseif new_popu(i,j) < lower_limit(j)                           %%if the variable fails to reach minimum allowed value then it is rounded upto the bound
+                new_popu(i,j) = lower_limit(j);
+            end
+        end
+    end
+    
+end
+
+
+
+function [mutated_new_popu,CostVector,bestCost,bestChromosome,average_cost] = mutation_costVector_bestSolution(V1,R_l,t,fs,new_popu,mutation_rate,N_pop,N_var,upper_limit,lower_limit)
+
+    mutated_new_popu = new_popu;                                                    %%initialising final population
+    total_mutations = ceil(mutation_rate*N_pop);                                    %%total number of mutations
+    
+    %Checking the minimum cost valued row
+    CostVector = cost_vector(new_popu,N_pop,V1,R_l,t,fs);                           %%calculating cost values for each row (refer to the function: cost_vector)
+    min = 1;                                                                        %%initialising the row index of the desired row
+    min_value = CostVector(min);                                                    %%initialising the cost value of the desired row
+    for i = 1:N_pop                                                                 %%going through each row to get minimum cost value
+       %%updating the new least cost valued row index and its value
+       if CostVector(i) <= min_value                                               
+          min = i;
+          min_value = CostVector(min);
+       end
+    end
+    
+    %Updating the best solution details
+    bestCost = min_value;
+    average_cost = (sum(CostVector)/N_pop);
+    bestChromosome = new_popu(min,:);
+    
+    flag = 0;                                                                       %%to check whether the best solution is being mutated
+    x = 1;                                                                          %%for allowing the below while loop for the first trial
+    
+    %Keeps generating new rows to be mutated as long as the mimnimum cost valued row is
+    %present among it
+    while flag == 1 || x == 1
+        mrow = ceil(rand(1,total_mutations)*N_pop);                                     %%chromosomes/rows of the population to be mutated
+        flag = 0;                                                                       %%resets the flag
+        for i = 1:total_mutations                                                       %%going through each row generated
+            if mrow(i) == min                                                           %%goes out of loop while setting flag as 1 if the minimum cost valued row is detected
+                flag = 1;
+                break
+            end
+        end
+        x = 0;                                                                          %%leaving the decision to flag alone for while loop
+    end
+    
+    mcol = ceil(rand(1,total_mutations)*N_var);                                     %%variables of to be mutated of each randomly selected chromosome
+    
+    %Going through each randomly picked chromosome to be mutated
+    for i = 1:total_mutations
+        mutated_new_popu(mrow(i),mcol(i)) = 2*rand*new_popu(mrow(i),mcol(i));       %%mutation (the new variable can go from 0 to twice the old variable value)
+    end
+    
+    %Ensuring that all the variables are within acceptable bound
+    for i = 1:1:N_pop                                                               %%going through each row
+        for j = 1:1:N_var                                                           %%going through each column
+            if mutated_new_popu(i,j) > upper_limit(j)                               %%if the variable exceeds the limit then it will be cut short within bound
+                mutated_new_popu(i,j) = upper_limit(j);
+            elseif mutated_new_popu(i,j) < lower_limit(j)                           %%if the variable fails to reach minimum allowed value then it is rounded upto the bound
+                mutated_new_popu(i,j) = lower_limit(j);
+            end
+        end
+    end
+    
+end
+
+
+
+function rankWeight_pairs = pairing_method3(N_keep)
+    
+    %Calculating probability vector for the parents (rows) of parent
+    %population for pairing
+    prob = zeros(N_keep,1);                              %%initialising probability vector of parent population (index corresponds to row no.)
+    Sum = 0;                                           
+    for i = 1:N_keep                                    %%summing all the indices
+       Sum = Sum+i; 
+    end
+    for i = 1:N_keep                                    %%assigning probability, inversely related to the rank of the parent population
+        prob(i) = (N_keep-i+1)/Sum;
+    end
+    cumul_prob = cumsum(prob);                          %%cumulative probability vector of the parent population (index corresponds to row no.)                         
+    
+    %Selecting the parents out of parent population for pairing
+    pa = zeros(1,N_keep);                               %%initialising father parents' vector
+    ma = pa;                                            %%initialising mother parents' vector
+    p = 1;                                              %%initialising father parents' vector's index
+    m = 1;                                              %%initialising mother parents' vector's index
+    while pa(N_keep)==0 && ma(N_keep)==0                %%assigning values to the pa and ma vectors till all the elements are updated
+       %Selecting the father parent depending on the position of x with 
+       %respect to the cumulative probability vector's elements
+       x = rand*(cumul_prob(N_keep)-cumul_prob(1))+cumul_prob(1);
+       for i=1:N_keep                                   
+          if x<cumul_prob(i)                            %%selecting that row of parent population corresponding to whose cumulative probability's value is just greater than x
+             pa(p) = i;
+             p = p+1;                                   %%going to the next index of the pa vector
+             break
+          end
+       end
+       %Selecting mother parent randomly
+       y = ceil(N_keep*rand);                           %taking a random row out of the parent population                                         
+       ma(m) = y;
+       m = m+1;
+    end
+    
+    %Making rank weghted pairs' matrix
+    rankWeight_pairs = [pa;ma];
+    
+end
+
+
+
+function [L1,L2,C,G]=result(R_l,best_chromosomes,best_cost_values,average_cost_values,last)
+    
+    %Getting controller parameters
+    L1=best_chromosomes(last,1);
+    L2=best_chromosomes(last,2);
+    C=best_chromosomes(last,3);
+    G = tf(1,[L1*L2*C L1*R_l*C (L1+L2) R_l]);
+    
+    %Checking convergence
+    n = 1:1:last;
+    figure;
+    plot(n,best_cost_values(1:1:last),'k',n,average_cost_values(1:1:last),'g');
+    legend("Best cost values","Average cost values");
+    grid;
+    title("Convergence check");
+    xlabel("Iteration no.");
+    ylabel("Value");
+    
+end
+
+
+
+function output = Sine_wave(t,f,phi)
+    output = 0.5 + 0.5*sin(2*pi*f*t + (phi*pi)/180);
+end
+
+
+
+function output = Tri_wave(t,f)
+    T = 1/f;
+    n = size(t,2);
+    output = zeros(1,n);
+    for i = 1:n
+        tx = t(i);
+        x = floor(tx/T);
+        if tx-(x*T) <= T/2
+            output(i) = (tx-(x*T))*(2/T);
+        elseif tx-(x*T) > T/2
+            output(i) = (tx-(x*T)- T)*(-2/T);
+        end
+    end
+end
+
+
+
+function output = V_rgb(g_pulse,Vdc,Vn)
+    output = Vdc*not(g_pulse) - Vn;
+end
+
+
+
+function output = comparator(wave1,wave_ref)
+    output = wave1 < wave_ref;
+end
