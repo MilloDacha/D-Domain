@@ -78,7 +78,7 @@ function [best_cost_values,best_chromosomes,L1,L2,C,G,last] = Genetic_algo(V1,t,
             parent_popu = eliminate_popu(arranged_popu,N_keep,N_pop);     %refer to the function: eliminate_popu
     
             %pairing the parents (any of the pairing methods can be used)
-            pairs = pairing_method3(N_keep);                                    %refer to the function: paring_method1
+            pairs = pairing_method1(N_keep);                                    %refer to the function: paring_method1
     
             %mating the paired parents and getting new population with offsprings
             new_popu = mating(N_pop,N_keep,parent_popu,pairs,upper_limit,lower_limit,N_var);                  %refer to the function: mating
@@ -357,7 +357,7 @@ end
 
 
 %This function pairs the individual with higher probability of taking those whose cost value is better
-function rankWeight_pairs = pairing_method3(N_keep)
+function rankWeight_pairs = pairing_method1(N_keep)
     
     %Calculating probability vector for the parents (rows) of parent
     %population for pairing
