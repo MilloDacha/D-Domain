@@ -16,7 +16,7 @@ N_pop = 100;                                %total size of population
 N_var = 3;                                  %total number of variables (LCL filter parameters)
 s_rate = 0.4;                               %selection rate
 upper_limit = [1000,1000,500];              %upper limit value for L1 (in mH), L2 (in mH) and C (in microFarad) respectively
-lower_limit = [0,0,0];                      %lower limit value for L1 (in mH), L2 (in mH) and C (in microFarad) respectively
+lower_limit = [100,100,1];                      %lower limit value for L1 (in mH), L2 (in mH) and C (in microFarad) respectively
 mutation_rate = 0.02;                       %mutation rate
 total_iter = 50;                            %total number of iterations
 
